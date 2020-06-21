@@ -7,3 +7,109 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+# Overview
+
+In this report a machine learning model (what type) is built to predict the class `classe` to which a single barbell lift belongs, based on data collected from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. There are 5 classes (A, B, C, D and E), with class "A" being a correct barbell lift.
+
+### R version and required packages
+
+```{r version}
+Sys.Date()
+version
+```
+
+```{r packages, message=FALSE}
+library(tidyverse)
+library(caret)
+```
+
+# Importing Data. Train and Test Split
+
+The data is downloaded into the current directory and loaded into R. The current directory can be found using `getwd()`.
+
+```{r import}
+if(!file.exists("./barbell.csv")) {
+        download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+                      destfile = "./barbell.csv", method = "curl")
+}
+barbell <- read.csv("./barbell.csv")
+barbell$classe <- as.factor(barbell$classe)
+```
+
+We now split the data into train and test sets.
+
+```{r split}
+set.seed(4567)
+inTrain <- createDataPartition(barbell$classe, p = 0.7, list = FALSE)
+train <- as_tibble(barbell[inTrain,])
+test <- as_tibble(barbell[-inTrain,])
+```
+
+From now on, the test data is not touched.
+
+# Exploratory Data Analysis
+
+```{r explore}
+dim(train)
+summary(train$classe)
+```
+
+We can see how `train$classe` is distributed
+
+```{r ABCDE, fig.height=4, fig.width=5, fig.align='center'}
+ggplot(train, aes(x = classe)) + theme_minimal() +
+        geom_bar(aes(fill = classe), show.legend = FALSE) +
+        scale_fill_manual(values = c("orangered3", "palegreen4", "palegreen3", "palegreen2", "palegreen1")) +
+        labs(title = "Classe Distribution", x = "Classe", y = "Count")
+```
+
+When viewing the data set, it is obvious that some variables are just participant classifiers or summary statistics. Therefore, they will not be used to build a model. These variable numbers are assigned to the object `exl_var`.
+
+```{r exl_var}
+exl_var <- c(1:7, 12:36, 50:59, 69:83, 87:101, 103:112, 125:139, 141:150)
+```
+
+These are variables like:
+
+```{r what}
+head(names(train[,exl_var]))
+```
+
+Hence, the model will use:
+
+```{r real_preds}
+length(names(train)) - length(exl_var) - 1 # -1 as this is the outcome variable
+```
+
+52 predictors.
+
+The remaining variables have the following classes:
+
+```{r var_class}
+table(as.factor(sapply(train[,-c(exl_var, 160)], class))) # variable 160 is the outcome
+```
+
+We can have see whether there is any trend of a given predictor variable vs the index. These plots are coloured by `classe`.
+
+```{r plots, fig.height=9, fig.width=7, fig.align='center', cache=TRUE}
+par(mfrow = c(8, 7), mar = c(2, 2, 1, 1))
+for(i in 1:ncol(train[,-c(exl_var, 160)])) {
+        x <- 1:length(train$classe)
+        y <- train[,-c(exl_var, 160)][, i, drop = TRUE]
+        plot(x, y, col = train$classe)
+}
+```
+
+Some clustering and grouping implies we can use random forest, boosting or linear discriminant analysis methods.
+
+# Course Project Prediction
+
+The data for the course prediction quiz is downloaded below and the final model is used to predict the class
+
+```{r prediction}
+if(!file.exists("./prediction.csv")) {
+        download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
+                      destfile = "./prediction.csv", method = "curl")
+}
+```
+
