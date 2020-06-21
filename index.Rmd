@@ -21,9 +21,10 @@ version
 ```{r packages, message=FALSE}
 library(tidyverse)
 library(caret)
+library(elasticnet)
 ```
 
-# Importing Data. Train and Test Split
+# Importing Data. Splitting Data
 
 The data is downloaded into the current directory and loaded into R. The current directory can be found using `getwd()`.
 
@@ -36,16 +37,21 @@ barbell <- read.csv("./barbell.csv")
 barbell$classe <- as.factor(barbell$classe)
 ```
 
-We now split the data into train and test sets.
+We now split the data into train, validation and test sets.
 
 ```{r split}
 set.seed(4567)
-inTrain <- createDataPartition(barbell$classe, p = 0.7, list = FALSE)
-train <- as_tibble(barbell[inTrain,])
-test <- as_tibble(barbell[-inTrain,])
+inBuild <- createDataPartition(barbell$classe, p = 0.7, list = FALSE)
+build <- as_tibble(barbell[inBuild,])
+test <- as_tibble(barbell[-inBuild,])
+
+set.seed(3564)
+inTrain <- createDataPartition(build$classe, p = 0.7, list = FALSE)
+train <- as_tibble(build[inTrain,])
+validation <- as_tibble(build[-inTrain,])
 ```
 
-From now on, the test data is not touched.
+From now on, the test data is not touched. We will compare models' accuracies on the validation data.
 
 # Exploratory Data Analysis
 
@@ -89,6 +95,16 @@ The remaining variables have the following classes:
 table(as.factor(sapply(train[,-c(exl_var, 160)], class))) # variable 160 is the outcome
 ```
 
+Was this the right thing to do?
+
+```{r nsv, cache=TRUE}
+nearZeroVar(train) %in% exl_var
+exl_var %in% nearZeroVar(train)
+mean(exl_var %in% nearZeroVar(train))
+```
+
+Possibly the variable reduction was a bit extreme. We shall see how it impacts predictions.
+
 We can have see whether there is any trend of a given predictor variable vs the index. These plots are coloured by `classe`.
 
 ```{r plots, fig.height=9, fig.width=7, fig.align='center', cache=TRUE}
@@ -100,7 +116,134 @@ for(i in 1:ncol(train[,-c(exl_var, 160)])) {
 }
 ```
 
-Some clustering and grouping implies we can use random forest, boosting or linear discriminant analysis methods.
+Some clustering and grouping implies we can use decision trees, random forest, boosting or linear discriminant analysis methods, amongst others. The evident trend between index and classe is due to participants lifting the barbell a given way in a given order.
+
+# Building the Model
+
+All the 52 predictor variables will be used. First, let's fit a decision tree model:
+
+```{r rpart, cache=TRUE}
+set.seed(2837)
+rpart_model1 <- train(classe ~ ., data = train[,-exl_var], method = "rpart")
+confusionMatrix(predict(rpart_model1, validation[,-exl_var]), validation$classe)$overall[1]
+```
+
+This is not a very good model.
+
+Now, let's fit a random forest model with bootstrap, 0.632bootstrap and k-fold cross-validation.
+
+```{r rf, cache=TRUE}
+# bootstrap
+set.seed(818)
+rf_model1 <- train(classe ~ ., data = train[,-exl_var], method = "rf",
+                   ntree = 10, trControl = trainControl(method = "boot", number = 25))
+confusionMatrix(predict(rf_model1, validation[,-exl_var]), validation$classe)$overall[1]
+
+# bootstrap with more resamples
+set.seed(818)
+rf_model2 <- train(classe ~ ., data = train[,-exl_var], method = "rf",
+                   ntree = 10, trControl = trainControl(method = "boot", number = 50))
+confusionMatrix(predict(rf_model2, validation[,-exl_var]), validation$classe)$overall[1]
+
+# 0.632bootstrap
+set.seed(818)
+rf_model3 <- train(classe ~ ., data = train[,-exl_var], method = "rf",
+                   ntree = 10, trControl = trainControl(method = "boot632", number = 25))
+confusionMatrix(predict(rf_model3, validation[,-exl_var]), validation$classe)$overall[1]
+
+# k-fold with 10 folds
+set.seed(873)
+rf_model4 <- train(classe ~ ., data = train[,-exl_var], method = "rf",
+                   ntree = 10, trControl = trainControl(method = "cv", number = 10))
+confusionMatrix(predict(rf_model4, validation[,-exl_var]), validation$classe)$overall[1]
+
+# k-fold with 20 folds
+set.seed(873)
+rf_model5 <- train(classe ~ ., data = train[,-exl_var], method = "rf",
+                   ntree = 10, trControl = trainControl(method = "cv", number = 20))
+confusionMatrix(predict(rf_model5, validation[,-exl_var]), validation$classe)$overall[1]
+```
+
+It is interesting to note that with higher numbers of resamples, the model starts to overfit the data and performs worse when predicting the validation outcome. The 0.632bootstrap `rf_model3`, despite being slightly worse at predicting on the validation data, is preferred as it does not underestimate error. It and `rf_model5` might be stacked later.
+
+Random forests seem to do a great job. Let's see whether fitting a linear discriminant analysis model will increase the accuracy. All parameters from `rf_model3` and `rf_model5` remain the same, except for the modelling method.
+
+```{r lda, cache=TRUE}
+# 0.632bootstrap
+set.seed(818)
+lda_model1 <- train(classe ~ ., data = train[,-exl_var], method = "lda",
+                   trControl = trainControl(method = "boot632", number = 25))
+confusionMatrix(predict(lda_model1, validation[,-exl_var]), validation$classe)$overall[1]
+
+# k-fold with 20 folds
+set.seed(873)
+lda_model2 <- train(classe ~ ., data = train[,-exl_var], method = "lda",
+                   trControl = trainControl(method = "cv", number = 20))
+confusionMatrix(predict(lda_model2, validation[,-exl_var]), validation$classe)$overall[1]
+```
+
+Linear discriminant analysis does not work well for this data.
+
+From the models we have tried, random forest has worked best. Let's see the impact of changing the k parameter in `rf_model5`:
+
+```{r rf_k, cache=TRUE}
+# k-fold with 30 folds
+set.seed(873)
+rf_model6 <- train(classe ~ ., data = train[,-exl_var], method = "rf",
+                   ntree = 10, trControl = trainControl(method = "cv", number = 30))
+confusionMatrix(predict(rf_model6, validation[,-exl_var]), validation$classe)$overall[1]
+
+# k-fold with 40 folds
+set.seed(873)
+rf_model7 <- train(classe ~ ., data = train[,-exl_var], method = "rf",
+                   ntree = 10, trControl = trainControl(method = "cv", number = 40))
+confusionMatrix(predict(rf_model7, validation[,-exl_var]), validation$classe)$overall[1]
+
+# k-fold with 50 folds
+set.seed(873)
+rf_model8 <- train(classe ~ ., data = train[,-exl_var], method = "rf",
+                   ntree = 10, trControl = trainControl(method = "cv", number = 50))
+confusionMatrix(predict(rf_model8, validation[,-exl_var]), validation$classe)$overall[1]
+
+# k-fold with 100 folds
+set.seed(873)
+rf_model9 <- train(classe ~ ., data = train[,-exl_var], method = "rf",
+                   ntree = 10, trControl = trainControl(method = "cv", number = 100))
+confusionMatrix(predict(rf_model9, validation[,-exl_var]), validation$classe)$overall[1]
+```
+
+It seems that changing k does not significantly alter accuracy. One final parameter to explore is the number of trees. This significantly affects computational run time, so ntree > 15 will not be explored.
+
+```{r rf_ntree, cache=TRUE}
+# 0.632bootstrap, ntree = 5
+set.seed(818)
+rf_model10 <- train(classe ~ ., data = train[,-exl_var], method = "rf",
+                   ntree = 5, trControl = trainControl(method = "boot632", number = 25))
+confusionMatrix(predict(rf_model10, validation[,-exl_var]), validation$classe)$overall[1]
+
+# k-fold with 20 folds, ntree = 5
+set.seed(873)
+rf_model11 <- train(classe ~ ., data = train[,-exl_var], method = "rf",
+                   ntree = 5, trControl = trainControl(method = "cv", number = 20))
+confusionMatrix(predict(rf_model11, validation[,-exl_var]), validation$classe)$overall[1]
+
+# 0.632bootstrap, ntree = 15
+set.seed(818)
+rf_model12 <- train(classe ~ ., data = train[,-exl_var], method = "rf",
+                   ntree = 15, trControl = trainControl(method = "boot632", number = 25))
+confusionMatrix(predict(rf_model12, validation[,-exl_var]), validation$classe)$overall[1]
+
+# k-fold with 20 folds, ntree = 15
+set.seed(873)
+rf_model13 <- train(classe ~ ., data = train[,-exl_var], method = "rf",
+                   ntree = 15, trControl = trainControl(method = "cv", number = 20))
+confusionMatrix(predict(rf_model13, validation[,-exl_var]), validation$classe)$overall[1]
+```
+
+
+# Conclusion
+
+The reasons for picking the final model have been outlined above.
 
 # Course Project Prediction
 
