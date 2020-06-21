@@ -9,7 +9,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Overview
 
-In this report a machine learning model (what type) is built to predict the class `classe` to which a single barbell lift belongs, based on data collected from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. There are 5 classes (A, B, C, D and E), with class "A" being a correct barbell lift.
+In this report a machine learning model (random forest) is built to predict the class `classe` to which a single barbell lift belongs, based on data collected from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. There are 5 classes (A, B, C, D and E), with class "A" being a correct barbell lift. This is a classification, and not a regression, problem.
 
 ### R version and required packages
 
@@ -240,10 +240,39 @@ rf_model13 <- train(classe ~ ., data = train[,-exl_var], method = "rf",
 confusionMatrix(predict(rf_model13, validation[,-exl_var]), validation$classe)$overall[1]
 ```
 
+It is no suprise that more trees means greater accuracy. The original `rf_model3` and `rf_model5` will now be stacked. `rf_model12` and `rf_model13` are not used, despite greater accuracy, due to the heightened run time. A generalised additive modelling method will be used for the stacking:
+
+```{r gam, message=FALSE, warning=FALSE, cache=TRUE}
+df_pred <- tibble(pred_rf3 = predict(rf_model3, train[,-exl_var]),
+                  pred_rf5 = predict(rf_model5, train[,-exl_var]),
+                  classe = train$classe)
+
+gam_model <- train(classe ~ ., data = df_pred, method = "gam")
+confusionMatrix(predict(gam_model, tibble(pred_rf3 = predict(rf_model3, validation[,-exl_var]),
+                                          pred_rf5 = predict(rf_model5, validation[,-exl_var]),
+                                          classe = validation$classe)),
+                validation$classe)$overall[1]
+```
+
+It might be the case that the predictors are now collinear and therefore the generalised additive model is not very accurate. Hence, the most accurate model from all the ones fitted so far, `rf_model13`, will be the final model. Since we are using only one model, we can sacrifice time for accuracy.
 
 # Conclusion
 
-The reasons for picking the final model have been outlined above.
+The reasons for picking the final model have been outlined above. Let's see how accurate it is on the test data and therefore estimate the out of sample error.
+
+```{r final}
+test_pred <- predict(rf_model13, test[,-exl_var])
+
+final_acc <- confusionMatrix(test_pred, test$classe)$overall
+```
+
+This is a fantastic accuracy!
+
+The out of sample error estimate is:
+
+```{r oos}
+unname(1 - final_acc[1])
+```
 
 # Course Project Prediction
 
@@ -254,5 +283,9 @@ if(!file.exists("./prediction.csv")) {
         download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
                       destfile = "./prediction.csv", method = "curl")
 }
+
+prediction <- read.csv("./prediction.csv")
+predict(rf_model13, prediction[,-exl_var])
 ```
 
+Having taken the quiz I got one wrong, so a `r 19/20` accuracy, which is very close to the final accuracy of `r round(final_acc[1], 3)`.

@@ -368,7 +368,7 @@ summary {
 
 <div id="overview" class="section level1">
 <h1>Overview</h1>
-<p>In this report a machine learning model (what type) is built to predict the class <code>classe</code> to which a single barbell lift belongs, based on data collected from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. There are 5 classes (A, B, C, D and E), with class “A” being a correct barbell lift.</p>
+<p>In this report a machine learning model (random forest) is built to predict the class <code>classe</code> to which a single barbell lift belongs, based on data collected from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. There are 5 classes (A, B, C, D and E), with class “A” being a correct barbell lift. This is a classification, and not a regression, problem.</p>
 <div id="r-version-and-required-packages" class="section level3">
 <h3>R version and required packages</h3>
 <pre class="r"><code>Sys.Date()</code></pre>
@@ -596,10 +596,30 @@ rf_model13 &lt;- train(classe ~ ., data = train[,-exl_var], method = &quot;rf&qu
 confusionMatrix(predict(rf_model13, validation[,-exl_var]), validation$classe)$overall[1]</code></pre>
 <pre><code>## Accuracy 
 ## 0.986644</code></pre>
+<p>It is no suprise that more trees means greater accuracy. The original <code>rf_model3</code> and <code>rf_model5</code> will now be stacked. <code>rf_model12</code> and <code>rf_model13</code> are not used, despite greater accuracy, due to the heightened run time. A generalised additive modelling method will be used for the stacking:</p>
+<pre class="r"><code>df_pred &lt;- tibble(pred_rf3 = predict(rf_model3, train[,-exl_var]),
+                  pred_rf5 = predict(rf_model5, train[,-exl_var]),
+                  classe = train$classe)
+
+gam_model &lt;- train(classe ~ ., data = df_pred, method = &quot;gam&quot;)
+confusionMatrix(predict(gam_model, tibble(pred_rf3 = predict(rf_model3, validation[,-exl_var]),
+                                          pred_rf5 = predict(rf_model5, validation[,-exl_var]),
+                                          classe = validation$classe)),
+                validation$classe)$overall[1]</code></pre>
+<pre><code>##  Accuracy 
+## 0.4735308</code></pre>
+<p>It might be the case that the predictors are now collinear and therefore the generalised additive model is not very accurate. Hence, the most accurate model from all the ones fitted so far, <code>rf_model13</code>, will be the final model. Since we are using only one model, we can sacrifice time for accuracy.</p>
 </div>
 <div id="conclusion" class="section level1">
 <h1>Conclusion</h1>
-<p>The reasons for picking the final model have been outlined above.</p>
+<p>The reasons for picking the final model have been outlined above. Let’s see how accurate it is on the test data and therefore estimate the out of sample error.</p>
+<pre class="r"><code>test_pred &lt;- predict(rf_model13, test[,-exl_var])
+
+final_acc &lt;- confusionMatrix(test_pred, test$classe)$overall</code></pre>
+<p>This is a fantastic accuracy!</p>
+<p>The out of sample error estimate is:</p>
+<pre class="r"><code>unname(1 - final_acc[1])</code></pre>
+<pre><code>## [1] 0.01597281</code></pre>
 </div>
 <div id="course-project-prediction" class="section level1">
 <h1>Course Project Prediction</h1>
@@ -607,7 +627,13 @@ confusionMatrix(predict(rf_model13, validation[,-exl_var]), validation$classe)$o
 <pre class="r"><code>if(!file.exists(&quot;./prediction.csv&quot;)) {
         download.file(&quot;https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv&quot;,
                       destfile = &quot;./prediction.csv&quot;, method = &quot;curl&quot;)
-}</code></pre>
+}
+
+prediction &lt;- read.csv(&quot;./prediction.csv&quot;)
+predict(rf_model13, prediction[,-exl_var])</code></pre>
+<pre><code>##  [1] B A A A A E D B A A B C B A E E A B B B
+## Levels: A B C D E</code></pre>
+<p>Having taken the quiz I got one wrong, so a 0.95 accuracy, which is very close to the final accuracy of 0.984.</p>
 </div>
 
 
